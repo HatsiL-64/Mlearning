@@ -1,4 +1,0 @@
-Machine learning y redes neuronales
-
-Con el fin de dise;ar una IA, se definio a una celula nerviosa como una puerta logica con salidas binarias. A esta celula nerviosa entran multiples datos por las dendritas, estos datos se agrupan y si la se;al acumulada supera cierto umbral, se genera una salida transmitida por el axon. A este modelo de neurona se le llama MCP.
-
