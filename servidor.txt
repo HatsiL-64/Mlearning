@@ -1,0 +1,128 @@
+!pip install easyocr gTTs pyngrok
+from flask import Flask, request, send_file, render_template_string
+import easyocr
+import os
+#audio libreeia de voz
+from gtts import gTTS
+import cv2
+import numpy as np
+from pyngrok import ngrok
+#from flask_ngrok import run_with_ngrok
+from google.colab.patches import cv2_imshow
+#Configurar ngrok
+Token="39XWnEGQ4sFO2zBwbTi4GC0QCli_2DbKSuwte8EKb2qc3bL7g"
+ngrok.set_auth_token(Token)
+app=Flask(_name_)
+#Dice el texto detectado
+#Función para ordenar puntos/vertices del contorno
+reader=easyocr.Reader(['es'],gpu=True)
+def ordenar(vertices):
+    #De la variable aprox, se pasa como lista para tener solo un corchete
+    puntos= np.concatenate([vertices[0],vertices[1],vertices[2],vertices[3]]).tolist()
+    #Ordenar en y según el valor de puntos gracias a lamda
+    y=sorted(puntos,key=lambda puntos: puntos[1])
+    #Los que están más cercanos a cero estarán en primer lugar
+    x=y[:2]
+    x=sorted(x,key=lambda x:x[0])
+    x2=y[2:4]
+    x2=sorted(x2,key=lambda x2:x2[0])
+    return [x[0],x[1],x2[0],x2[1]]
+def hablar(texto):
+    if not texto.strip():
+        return
+    tts=gTTS(text=texto, lang='es')
+    tts.save("voz.mp3")
+@app.route('/procesar',methods=['POST'])
+def procesar():
+    try:
+        imagenRe=request.data
+        if not imagenRe:
+            return "No hay datos",400
+        #with open("captura.jpg","wb") as f:
+        #   f.write(imagenRe)
+        #imagen=Image.open(io.BytesIO(imagenRe))
+        #Para convertir a formato para OpenCv
+        imagenCv = np.frombuffer(imagenRe,np.uint8)
+        imag=cv2.imdecode(imagenCv,cv2.IMREAD_COLOR)
+        #Escala de grises
+        gris=cv2.cvtColor(imag,cv2.COLOR_BGR2GRAY)
+        #Eliminae ruido
+        #el (x,y) es el tamaño del kernel ancho y alyo
+        gris=cv2.GaussianBlur(gris,(5,5),0)
+        #Suavizar
+        gris=cv2.medianBlur(gris,3)
+        gris=cv2.bilateralFilter(gris,9,75,75)
+        #Detección de bordes, umbral alto y bajo
+        bordes=cv2.Canny(gris,10,150)
+        #dilata imagenes
+        #Como se van a expandir los pixeles blancos, dirección
+        bordes =cv2.dilate(bordes,None,iterations=1)
+        #Encontrar contornos externos
+        #Imagen, como devolverá los contornos, como se almacenarñan los puntos del contorno
+        contExt=cv2.findContours(bordes,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[0]
+        #Ordenar los contornos de mayor a menor
+        #Objeto para ordenar, Criterio de ordenamiento, en qué orde
+        contExt=sorted(contExt, key=cv2.contourArea,reverse=True)[:1]
+        #Ver los vertices del contorno de la imagen
+        #arcLength calcula el perimetro de contorno, por un porcentaje para la precisión de aproximación de contornos
+        #porcApro es la distancia máxima entre el contorno original y la aproximación
+        #Detectar el rectangulo
+        imagFinal=gris
+        for a in contExt:
+            porcApro=0.01*cv2.arcLength(a,True)
+            #True si el contorno es cerrado
+            aprox=cv2.approxPolyDP(a,porcApro,True)
+            #Mantener vértices más prominentes
+            if len(aprox)==4:
+                puntos=ordenar(aprox)
+                #Poner puntos de imagen de entrada y de destino
+                # ptse = np.float32([aprox[1][0],aprox[0][0],aprox[2][0],aprox[3][0]])
+                ptse=np.float32(puntos)
+                ptsd= np.float32([[0,0],[270,0],[0,310],[270,310]])
+                nuev=cv2.getPerspectiveTransform(ptse,ptsd)
+                imagFinal=cv2.warpPerspective(gris,nuev,(270,310))
+                #cv2.imwrite("recorte.jpg",imagFinal)
+                #os.system("termux-open recorte.jpg")
+                #imagen = Image.fromarray(imagFinal)
+                break
+        #nitidez=np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]])
+        #imagFinal=cv2.filter2D(imagFinal,-1,nitidez)
+        #Convertir todo a blanco y negro
+        #_, imagFinal=cv2.threshold(imagFinal,127,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+        imagFinal=cv2.adaptiveThreshold(imagFinal,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,21,10)
+
+        #relleno = np.ones((3,3), np.uint8)
+        #imagFinal=cv2.erode(imagFinal,relleno,iterations=1)
+        #imagFinal = cv2.morphologyEx(imagFinal, cv2.MORPH_CLOSE, relleno)
+        #Esto hace más grande la imagen
+        imagFinal=cv2.resize(imagFinal,None,fx=3,fy=3, interpolation=cv2.INTER_CUBIC)
+
+        cv2_imshow(imagFinal)
+        #Limpiar espacios
+        #Pasar por el easyocr
+        resul=reader.readtext(imagFinal,detail=0,paragraph=True)
+        textoDetectado=" ".join(resul)
+        textoSinesp=" ".join(textoDetectado.split())
+
+        print(f"Texto:{textoSinesp}")
+        #Función hablar
+        hablar(textoSinesp)
+
+        return textoSinesp
+    except Exception as e:
+        print(f"Error: {e}")
+        return "Hay error"
+
+if _name_ == '_main_':
+    !pkill ngrok
+    ngrok.kill()
+    try:
+        ngrok.set_auth_token(Token)
+        # Abrir el túnel
+        tunel = ngrok.connect(5000)
+        urlP=tunel.public_url
+        print( f"Link:{urlP}/procesar")
+        # 3. Correr Flask
+        app.run(port=5000,threaded=True,debug=False,use_reloader=False)
+    except Exception as e:
+        print(f"Error al iniciar ngrok: {e}")
