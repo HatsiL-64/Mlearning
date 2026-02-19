@@ -1,0 +1,58 @@
+!pip install easyocr
+!pip install symspellpy
+import cv2
+import numpy as np
+import easyocr
+import re
+from google.colab.patches import cv2_imshow
+from symspellpy import SymSpell, Verbosity
+import pkg_resources
+import urllib.request
+#CONFIGURAR EL SUMSPELLPY
+sym_spell = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
+dict_url="https://raw.githubusercontent.com/mammothb/symspellpy/master/symspellpy/frequency_dictionary_en_82_765.txt"
+try:
+  dictionary_path = pkg_resources.resource_filename("symspellpy",dict_url.split('/')[-1])
+  sym_spell.load.dictionary(dictionary_path, term_index=0, count_index=1)
+except:
+  print("ERROR")
+# 1. Escala y Gris
+imgPath = 'foto.jpg'
+img = cv2.imread(imgPath)
+gris=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+#quitar el texto para ver iluminación
+estructura=cv2.getStructuringElement(cv2.MORPH_RECT,(15,15))
+fondo=cv2.morphologyEx(gris,cv2.MORPH_DILATE,estructura)
+fondo=cv2.medianBlur(fondo,21)
+#Normalización, restar el fondo del original
+dif=255-cv2.absdiff(gris,fondo)
+#Normalizar contraste
+imgNor=cv2.normalize(dif,None,0,255,cv2.NORM_MINMAX)
+# Agrandar la imagen 2x o 3x
+imgNor = cv2.resize(imgNor, None, fx=3, fy=3, interpolation=cv2.INTER_LANCZOS4)
+#Esto sirve para trazos
+trazo=cv2.bilateralFilter(imgNor,9,75,75)
+#Enfocar
+gaus=cv2.GaussianBlur(trazo,(0,0),3)
+enfocado=cv2.addWeighted(trazo,1.8,gaus,-0.8,0)
+#Proceso de bordes para poder convertir a texto normal
+#gris=cv2.bilateralFilter(enfocado,5,50,50)
+
+gris=cv2.adaptiveThreshold(enfocado,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,51,15)
+reader = easyocr.Reader(['es'])
+resultados = reader.readtext(gris, detail=0, decoder='beamsearch',paragraph=True)
+textoNormal = " ".join(resultados)
+
+textoLimpio=re.sub(r'[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s]','',textoNormal)
+palabras=textoLimpio.split()
+textoCorregido=[]
+errores=0
+for palabra in palabras:
+  correccion=sym_spell.lookup(palabra,Verbosity.CLOSEST,max_edit_distance=2)
+  if correccion:
+    textoCorregido.append(correccion[0].term)
+  else:
+    textoCorregido.append(f"{palabra}")
+    errores+=1
+cv2_imshow(gris)
+print(" ".join(textoCorregido))
