@@ -1,0 +1,93 @@
+from flask import Flask, request, send_file, render_template_string
+import easyocr
+import os
+#audio libreeia de voz
+from gtts import gTTS
+import cv2
+import numpy as np
+from pyngrok import ngrok
+#from flask_ngrok import run_with_ngrok
+from google.colab.patches import cv2_imshow
+#Configurar ngrok
+Token="39XWnEGQ4sFO2zBwbTi4GC0QCli_2DbKSuwte8EKb2qc3bL7g"
+ngrok.set_auth_token(Token)
+app=Flask(__name__)
+#Dice el texto detectado
+#Función para ordenar puntos/vertices del contorno
+reader=easyocr.Reader(['es'],gpu=True)
+def ordenar(vertices):
+    #De la variable aprox, se pasa como lista para tener solo un corchete
+    puntos= np.concatenate([vertices[0],vertices[1],vertices[2],vertices[3]]).tolist()
+    #Ordenar en y según el valor de puntos gracias a lamda
+    y=sorted(puntos,key=lambda puntos: puntos[1])
+    #Los que están más cercanos a cero estarán en primer lugar
+    x=y[:2]
+    x=sorted(x,key=lambda x:x[0])
+    x2=y[2:4]
+    x2=sorted(x2,key=lambda x2:x2[0])
+    return [x[0],x[1],x2[0],x2[1]]
+def hablar(texto):
+    if not texto.strip():
+        return
+    tts=gTTS(text=texto, lang='es')
+    tts.save("voz.mp3")
+@app.route('/procesar',methods=['POST'])
+def procesar():
+    try:
+        imagenRe=request.data
+        if not imagenRe:
+            return "No hay datos",400
+        #with open("captura.jpg","wb") as f:
+        #   f.write(imagenRe)
+        #imagen=Image.open(io.BytesIO(imagenRe))
+        #Para convertir a formato para OpenCv
+        imagenCv = np.frombuffer(imagenRe,np.uint8)
+        imag=cv2.imdecode(imagenCv,cv2.IMREAD_COLOR)
+        #Escala de grises
+        gris=cv2.cvtColor(imag,cv2.COLOR_BGR2GRAY)
+        estructura=cv2.getStructuringElement(cv2.MORPH_RECT,(15,15))
+        fondo=cv2.morphologyEx(gris,cv2.MORPH_DILATE,estructura)
+        fondo=cv2.medianBlur(fondo,21)
+        #Normalizacióm, restar el fondo del original
+        dif=255-cv2.absdiff(gris,fondo)
+        #Normalizar contraste
+        imgNor=cv2.normalize(dif,None,0,255,cv2.NORM_MINMAX)
+        imgNor=cv2.resize(imgNor,None,fx=3,fy=3, interpolation=cv2.INTER_LANCZOS4)
+        #Para trazos (escrito)
+        trazo=cv2.bilateralFilter(imgNor,9,75,75)
+        gaus=cv2.GaussianBlur(trazo,(0,0),3)
+        gris=cv2.addWeighted(trazo,1.8,gaus,-0.8,0)
+        #Ver los vertices del contorno de la imagen
+        #arcLength calcula el perimetro de contorno, por un porcentaje para la precisión de aproximación de contornos
+        #porcApro es la distancia máxima entre el contorno original y la aproximación
+        #Detectar el rectangulo
+        procesada = cv2.adaptiveThreshold(gris, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 51, 15)
+        cv2_imshow(procesada)
+        #Limpiar espacios
+        #Pasar por el easyocr
+        resul=reader.readtext(procesada,detail=0,paragraph=True)
+        textoDetectado=" ".join(resul)
+        textoSinesp=" ".join(textoDetectado.split())
+
+        print(f"Texto:{textoSinesp}")
+        #Función hablar
+        hablar(textoSinesp)
+
+        return textoSinesp
+    except Exception as e:
+        print(f"Error: {e}")
+        return "Hay error"
+
+if __name__ == '__main__':
+    !pkill ngrok
+    ngrok.kill()
+    try:
+        ngrok.set_auth_token(Token)
+        # Abrir el túnel
+        tunel = ngrok.connect(5000)
+        urlP=tunel.public_url
+        print( f"Link:{urlP}/procesar")
+        # 3. Correr Flask
+        app.run(port=5000,threaded=True,debug=False,use_reloader=False)
+    except Exception as e:
+        print(f"Error al iniciar ngrok: {e}")
