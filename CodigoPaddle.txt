@@ -1,0 +1,101 @@
+!pip install paddlepaddle-gpu==2.6.1 -U
+!pip install "paddleocr>=2.7.0,<3.0.0" -U
+!pip install langchain==0.1.0 langchain-community==0.0.10 gTTS pyngrok --quiet
+
+import os
+import sys
+try:
+    import langchain_core.documents
+    import types
+    # Creamos la ruta virtual que PaddleX está buscando desesperadamente
+    mod = types.ModuleType('langchain.docstore.document')
+    sys.modules['langchain.docstore.document'] = mod
+    mod.Document = langchain_core.documents.Document
+except ImportError:
+    pass
+#os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
+from flask import Flask, request
+from paddleocr import PaddleOCR
+import re
+#audio libreeia de voz
+from gtts import gTTS
+import cv2
+import numpy as np
+from pyngrok import ngrok
+#from flask_ngrok import run_with_ngrok
+from google.colab.patches import cv2_imshow
+#Configurar ngrok
+Token="39XWnEGQ4sFO2zBwbTi4GC0QCli_2DbKSuwte8EKb2qc3bL7g"
+ngrok.set_auth_token(Token)
+app=Flask(__name__)
+#Inicializar Paddle
+ocr=PaddleOCR(use_angle_cls=True,lang='es',ocr_version='PP-OCRv4',show_log=False)
+#ocr=PaddleOCR(use_angle_cls=True
+#Dice el texto detectado
+def Visibilidad(gris):
+    if len(gris.shape)==3:
+        gris=cv2.cvtColor(gris,cv2.COLOR_BGR2GRAY)
+    agrandar=cv2.resize(gris,None,fx=2.5,fy=2.5,interpolation=cv2.INTER_LANCZOS4)
+    clahe=cv2.createCLAHE(clipLimit=3.0,tileGridSize=(8,8))
+    mejorada=clahe.apply(agrandar)
+    #Enfocar
+    enfoque=np.array([[0,-1,0],[-1,5,-1],[0,-1,0]])
+    enfocado=cv2.filter2D(mejorada,-1,enfoque)
+    #Limpia puntos
+    final=cv2.fastNlMeansDenoising(enfocado,None,10,7,21)
+    return final
+def hablar(texto):
+    if not texto.strip():
+        return
+    tts=gTTS(text=texto, lang='es')
+    tts.save("voz.mp3")
+@app.route('/procesar',methods=['POST'])
+def procesar():
+    try:
+        imagenRe=request.data
+        if not imagenRe:
+            return "No hay datos",400
+        #with open("captura.jpg","wb") as f:
+        #   f.write(imagenRe)
+        #imagen=Image.open(io.BytesIO(imagenRe))
+        #Para convertir a formato para OpenCv
+        imagenCv = np.frombuffer(imagenRe,np.uint8)
+        imag=cv2.imdecode(imagenCv,cv2.IMREAD_COLOR)
+        imagFinal=Visibilidad(imag)
+        cv2_imshow(imagFinal)
+
+        resultado=ocr.ocr(imagFinal,cls=True)
+        textoCompleto=""
+        if resultado and resultado[0]:
+            for linea in resultado[0]:
+                textoDetectado =linea[1][0]
+                mejor=linea[1][1]
+                if mejor > 0.6:
+                    textoCompleto+=textoDetectado+" "
+        textoFinal=re.sub(r'\s+', ' ',textoCompleto).strip()
+
+        print(f"Texto:{textoFinal}")
+
+        #Función hablar
+        if textoFinal:
+            hablar(textoFinal)
+            return textoFinal
+        else:
+            return "No se detecto bien",200
+    except Exception as e:
+        print(f"Error: {e}")
+        return "Hay error"
+
+if __name__ == '__main__':
+    !pkill ngrok
+    ngrok.kill()
+    try:
+        ngrok.set_auth_token(Token)
+        # Abrir el túnel
+        tunel = ngrok.connect(5000)
+        urlP=tunel.public_url
+        print( f"Link:{urlP}/procesar")
+        # 3. Correr Flask
+        app.run(port=5000,threaded=True,debug=False,use_reloader=False)
+    except Exception as e:
+        print(f"Error al iniciar ngrok: {e}")
