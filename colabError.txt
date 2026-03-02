@@ -208,12 +208,6 @@ def procesar():
         print(f"Error: {e}")
         return "Hay error"
 
-try:
-    r = requests.get("http://127.0.0.1:5000")
-    print("Respuesta local:", r.text)
-except Exception as e:
-    print("Flask no está corriendo:", e)
-
 
 if __name__ == '__main__':
     #!pkill ngrok
