@@ -3,7 +3,7 @@
 !pip install langchain==0.1.0 langchain-community==0.0.10 gTTS pyngrok --quiet
 !pip install ultralytics
 !pip install flask pyngrok --quiet
-
+!pkill ngrok
 import os
 import webbrowser
 import sys
@@ -210,7 +210,7 @@ def procesar():
 
 
 if __name__ == '__main__':
-    #!pkill ngrok
+    !pkill ngrok
     ngrok.kill()
     try:
         ngrok.set_auth_token(Token)
