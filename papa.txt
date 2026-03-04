@@ -1,0 +1,60 @@
+!pip uninstall -y numpy
+!pip install numpy==1.23.5 --force-reinstall --no-cache-dir
+!pip install paddlepaddle-gpu==2.6.1 --force-reinstall --no-cache-dir
+!pip install "paddleocr>=2.7.0,<3.0.0" --force-reinstall --no-cache-dir
+!pip install langchain==0.1.0 langchain-community==0.0.10 gTTS --quiet
+
+import os
+import sys
+import cv2
+import numpy as np
+from paddleocr import PaddleOCR
+from gtts import gTTS
+from google.colab.patches import cv2_imshow
+from google.colab import output
+
+def Visibilidad(gris):
+    if len(gris.shape)==3:
+        gris=cv2.cvtColor(gris,cv2.COLOR_BGR2GRAY)
+    else:
+        gris=gris
+    agrandar=cv2.resize(gris,None,fx=2.5,fy=2.5,interpolation=cv2.INTER_LANCZOS4)
+    clahe=cv2.createCLAHE(clipLimit=3.0,tileGridSize=(8,8))
+    mejorada=clahe.apply(agrandar)
+    #Enfocar
+    enfoque=np.array([[0,-1,0],[-1,5,-1],[0,-1,0]])
+    enfocado=cv2.filter2D(mejorada,-1,enfoque)
+    #Limpia puntos
+    final=cv2.fastNlMeansDenoising(enfocado,None,10,7,21)
+    return final
+
+
+def hablar(texto):
+    if not texto.strip():
+        return
+    tts=gTTS(text=texto, lang='es')
+    tts.save("voz.mp3")
+
+imagenCv = np.frombuffer(imagenRe,np.uint8)
+imag=cv2.imdecode(imagenCv,cv2.IMREAD_COLOR)
+imagFinal=Visibilidad(imag)
+cv2_imshow(imagFinal)
+
+resultado=ocr.ocr(imagFinal,cls=True)
+textoCompleto=""
+if resultado and resultado[0]:
+    for linea in resultado[0]:
+        textoDetectado =linea[1][0]
+        mejor=linea[1][1]
+        if mejor > 0.45:
+            textoCompleto+=textoDetectado+" "
+textoFinal=re.sub(r'\s+', ' ',textoCompleto).strip()
+
+print(f"Texto:{textoFinal}")
+
+#Función hablar
+if textoFinal:
+    hablar(textoFinal)
+    return textoFinal
+else:
+    return "No se detecto bien",200
