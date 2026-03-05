@@ -12,6 +12,7 @@ from paddleocr import PaddleOCR
 from gtts import gTTS
 from google.colab.patches import cv2_imshow
 from google.colab import output
+import
 
 def Visibilidad(gris):
     if len(gris.shape)==3:

@@ -2,38 +2,34 @@
 !pip install "paddleocr>=2.7.0,<3.0.0" -U
 !pip install langchain==0.1.0 langchain-community==0.0.10 gTTS pyngrok --quiet
 !pip install ultralytics
-!pip install flask pyngrok --quiet
-!pkill ngrok
+!pip install flask
+!pip install flask-ngrok
+
 import os
-import webbrowser
 import sys
-from flask import Flask, request, render_template_string, send_file, jsonify
-from paddleocr import PaddleOCR
 import re
+import numpy as np
+from paddleocr import PaddleOCR
 from gtts import gTTS
 import cv2
-import numpy as np
-from ultralytics import YOLO
-from pyngrok import ngrok
 from google.colab.patches import cv2_imshow
 from google.colab import output
+from ultralytics import YOLO
+from flask import Flask, request, render_template_string, send_file, jsonify
+from pyngrok import ngrok
 from IPython.display import display, HTML
-import requests
+from flask_ngrok import run_with_ngrok
+import threading
 
-#Configurar ngrok
 Token="3AMgsXXyqJVygtTOEVMFjczHRsz_4vzUeX29b4P9Z4zGbD99z"
-#Token="39XWnEGQ4sFO2zBwbTi4GC0QCli_2DbKSuwte8EKb2qc3bL7g"
-#Token="3AA7OHVpWiU2zPYE2H3c"
 ngrok.set_auth_token(Token)
 app=Flask(__name__)
+run_with_ngrok(app)
 
-#Inicializar Paddle
 ocr=PaddleOCR(use_angle_cls=True,lang='es',ocr_version='PP-OCRv4',show_log=False)
 
-#Inicializar Yolo
 yolo = YOLO('yolov8n.pt')
 
-#Dice el texto detectado
 def Visibilidad(gris):
     if len(gris.shape)==3:
         gris=cv2.cvtColor(gris,cv2.COLOR_BGR2GRAY)
@@ -48,6 +44,7 @@ def Visibilidad(gris):
     #Limpia puntos
     final=cv2.fastNlMeansDenoising(enfocado,None,10,7,21)
     return final
+
 
 def hablar(texto):
     if not texto.strip():
@@ -112,6 +109,18 @@ def interfaz():
       </body>
       </html>
     ''')
+@app.route('/audio')
+def audio():
+  if os.path.exists("voz.mp3"):
+      #Cuando se creo el archivo
+      tiempo=os.path.getmtime("voz.mp3")
+      return jsonify({"timestamp":tiempo})
+  return jsonify({"timestamp":0})
+
+@app.route('/descarga')
+def descarga():
+    return send_file("voz.mp3")
+
 @app.route('/detectar', methods=['POST'])
 def detectar():
     try:
@@ -162,24 +171,13 @@ def detectar():
         print(f"Error: {e}")
         return "Hay error"
 
-@app.route('/audio')
-def audio():
-  if os.path.exists("voz.mp3"):
-      #Cuando se creo el archivo
-      tiempo=os.path.getmtime("voz.mp3")
-      return jsonify({"timestamp":tiempo})
-  return jsonify({"timestamp":0})
-
-@app.route('/descarga')
-def descarga():
-    return send_file("voz.mp3")
-
 @app.route('/procesar',methods=['POST'])
 def procesar():
     try:
         imagenRe=request.data
         if not imagenRe:
             return "No hay datos",400
+        print("Petición recibida en /procesar")    
         imagenCv = np.frombuffer(imagenRe,np.uint8)
         imag=cv2.imdecode(imagenCv,cv2.IMREAD_COLOR)
         imagFinal=Visibilidad(imag)
@@ -208,10 +206,18 @@ def procesar():
         print(f"Error: {e}")
         return "Hay error"
 
-
+#def run_flask():
+ # app.run(port=5000,threaded=True,debug=False,use_reloader=False)
+'''@app.route('/ping', methods=['POST'])
+def ping():
+    return "pong", 200
+'''
 if __name__ == '__main__':
     !pkill ngrok
+    !fuser -k 5000/tcp
     ngrok.kill()
+    #flask_thread = threading.Thread(target=run_flask, daemon=True)
+    #flask_thread.start()
     try:
         ngrok.set_auth_token(Token)
         # Abrir el túnel
@@ -220,10 +226,10 @@ if __name__ == '__main__':
 
         # Abrir automáticamente y mostrar link de respaldo
         display(HTML(f'<h2><a href="{urlP}" target="_blank">Click aquí si no abre solo</a></h2>'))
-        output.eval_js(f'window.open("{urlP}", "_blank")')
+        #output.eval_js(f'window.open("{urlP}", "_blank")')
 
         print( f"Link:{urlP}")
         # 3. Correr Flask
-        app.run(port=5000,host="0.0.0.0",threaded=True,debug=False,use_reloader=False)
+        app.run()
     except Exception as e:
         print(f"Error al iniciar ngrok: {e}")
